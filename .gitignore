@@ -1,0 +1,59 @@
+# Binja binary
+binja
+
+# Object files
+*.o
+*.obj
+
+# Backup files
+*.bak
+*.backup
+
+# History file
+.binja_history
+
+# Debug files
+*.dSYM/
+*.gdb_history
+core
+core.*
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.orig
+
+# Build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binaries
+test
+test2
+test3
+test_*
+test_binja
+test_binja_*
+*.stripped
+
+# Compiled test files
+*.out
+
+# Logs
+*.log
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Compiler generated
+*.su
+*.gcda
+*.gcno
+*.gcov
