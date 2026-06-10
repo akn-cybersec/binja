@@ -615,7 +615,7 @@ Do not use binja to analyze or patch binaries without authorization. The authors
 > **"Trust The Process" — My Princess**
 
 ## Author
-**kaizen_dragon**
+**kaizen_dragon** *(Muhammad Abdullah Khan/AKN/0xk41z3n)*
 
 ---
 
