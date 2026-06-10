@@ -40,7 +40,7 @@ A lightweight, no-frills ELF analysis tool built for reverse engineers, binary e
 
 ```bash
 # Build
-git clone https://github.com/kaizen_dragon/binja
+git clone https://github.com/akn-cybersec/binja
 cd binja && make
 
 # Drop into interactive REPL
@@ -622,7 +622,7 @@ Do not use binja to analyze or patch binaries without authorization. The authors
 MIT License
 
 ```
-Copyright (c) 2025 kaizen_dragon
+Copyright (c) 2026 kaizen_dragon
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
