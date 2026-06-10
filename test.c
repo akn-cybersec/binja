@@ -1,4 +1,4 @@
-// test_binja.c - Comprehensive test binary for binja analysis tool
+// test.c - Comprehensive test binary for binja analysis tool
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -6,12 +6,10 @@
 #include <unistd.h>
 #include <fcntl.h>
 
-// Global variables for testing
 char global_data[] = "Sensitive data in .data section";
 const char rodata_string[] = "Constant string in .rodata section";
 static int static_counter = 0;
 
-// Function declarations
 void secret_function(void);
 void win_function(void);
 void vulnerable_function(char *input);
@@ -20,27 +18,23 @@ void indirect_call(void (*func)(void));
 int calculate_sum(int a, int b, int c, int d);
 void print_flag(void);
 
-// Secret function - should be found by xrefs
 void secret_function(void) {
     printf("[SECRET] You found the secret function!\n");
     printf("[SECRET] Flag: BINJA{S3cr3t_Funct10n_D1sc0v3r3d}\n");
 }
 
-// Win function - target for patching examples
 void win_function(void) {
     printf("[WIN] Congratulations! You reached the win function!\n");
     printf("[WIN] This is the intended success path.\n");
 }
 
-// Vulnerable function - demonstrates buffer overflow
 void vulnerable_function(char *input) {
     char buffer[64];
     printf("[VULN] Copying input of length %zu bytes\n", strlen(input));
-    strcpy(buffer, input);  // Vulnerable to buffer overflow
+    strcpy(buffer, input);
     printf("[VULN] Buffer contains: %s\n", buffer);
 }
 
-// Recursive function for testing
 void recursive_function(int depth) {
     if (depth <= 0) {
         printf("[RECUR] Base case reached at depth %d\n", depth);
@@ -50,13 +44,11 @@ void recursive_function(int depth) {
     recursive_function(depth - 1);
 }
 
-// Indirect call example
 void indirect_call(void (*func)(void)) {
     printf("[INDIRECT] Calling function pointer at %p\n", (void*)func);
     func();
 }
 
-// Calculate sum with multiple parameters
 int calculate_sum(int a, int b, int c, int d) {
     int result = a + b + c + d;
     printf("[CALC] %d + %d + %d + %d = %d\n", a, b, c, d, result);
@@ -75,7 +67,6 @@ void print_flag(void) {
     printf("\n");
 }
 
-// Function that calls multiple others
 void dispatch_commands(int cmd) {
     switch(cmd) {
         case 1:
@@ -92,7 +83,6 @@ void dispatch_commands(int cmd) {
     }
 }
 
-// Main function
 int main(int argc, char *argv[]) {
     int choice;
     char user_input[256];
@@ -114,29 +104,24 @@ int main(int argc, char *argv[]) {
     printf("[MAIN] Address of print_flag: %p\n", print_flag);
     printf("\n");
     
-    // Test recursive function
     printf("[TEST] Testing recursive function:\n");
     recursive_function(3);
     printf("\n");
     
-    // Test indirect call
     printf("[TEST] Testing indirect call:\n");
     indirect_call(win_function);
     printf("\n");
     
-    // Test calculate sum
     printf("[TEST] Testing calculate sum:\n");
     int sum = calculate_sum(10, 20, 30, 40);
     printf("[TEST] Sum result: %d\n", sum);
     printf("\n");
     
-    // Test dispatch
     printf("[TEST] Testing dispatch:\n");
     dispatch_commands(1);
     dispatch_commands(2);
     printf("\n");
     
-    // Interactive menu
     while(1) {
         printf("\n");
         printf("┌─────────────────────────────────────────────────┐\n");
@@ -153,7 +138,7 @@ int main(int argc, char *argv[]) {
         if (scanf("%d", &choice) != 1) {
             break;
         }
-        getchar(); // consume newline
+        getchar();
         
         switch(choice) {
             case 1:
