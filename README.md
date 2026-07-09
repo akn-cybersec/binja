@@ -41,7 +41,7 @@ A lightweight, no-frills ELF analysis tool built for reverse engineers, binary e
 ```bash
 # Build
 git clone https://github.com/akn-cybersec/binja
-cd binja && make
+cd binja && sudo make
 
 # Drop into interactive REPL
 ./binja ./target_binary
