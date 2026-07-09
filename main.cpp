@@ -1,6 +1,7 @@
 #include "elf_parser.h"
 #include "disassembler.h"
 #include "patcher.h"
+#include "rop_finder.h"
 #include <iostream>
 #include <iomanip>
 #include <sstream>
@@ -20,6 +21,7 @@ std::vector<std::string> command_history;
 size_t history_index = 0;
 
 // Function prototypes
+// Function prototypes
 void print_usage(const char* progname);
 void print_interactive_help();
 void save_to_history(const std::string& cmd);
@@ -27,6 +29,21 @@ void load_history();
 void add_to_history(const std::string& cmd);
 std::string get_input();
 void signal_handler(int sig);
+
+// Command handlers (implementations)
+void cmd_info(ElfParser& elf);
+void cmd_functions(ElfParser& elf);
+void cmd_strings(ElfParser& elf, size_t min_len);
+void cmd_disas(ElfParser& elf, Disassembler& dis, const std::string& target);
+void cmd_xrefs(ElfParser& elf, Disassembler& dis, const std::string& target);
+void cmd_patch(ElfParser& elf, const std::string& target, const std::string& hex_bytes);
+void cmd_hexdump(ElfParser& elf, const std::string& section, size_t offset, size_t length);
+void cmd_sections(ElfParser& elf);
+void cmd_segments(ElfParser& elf);
+void cmd_history();
+
+void cmd_rop_find(ElfParser& elf, Disassembler& dis, const std::string& args = "");
+void cmd_rop_export(ElfParser& elf, Disassembler& dis, const std::string& gadget_addresses, const std::string& filename);
 
 // Command handlers (implementations)
 void cmd_info(ElfParser& elf) {
@@ -269,6 +286,8 @@ void print_interactive_help() {
               << "  hexdump <section> [offset] [len]  - Hex dump section\n"
               << "  sections                          - List all sections\n"
               << "  segments                          - List program segments\n"
+              << "  rop find [--pop|--syscall|--mov]  - Find ROP gadgets\n"
+              << "  rop export <addrs> <file>         - Export ROP chain\n"
               << "  help                              - Show this help\n"
               << "  history                           - Show command history\n"
               << "  !<n>                              - Repeat command n from history\n"
@@ -442,6 +461,34 @@ bool execute_command(ElfParser& elf, const std::string& input) {
     else if (command == "segments") {
         cmd_segments(elf);
     }
+    else if (command == "rop") {
+        std::string subcmd;
+        iss >> subcmd;
+        
+        if (subcmd == "find") {
+            std::string args;
+            std::getline(iss, args);
+            Disassembler dis;
+            if (!dis.init(elf.is_64bit(), elf.is_little_endian())) {
+                return true;
+            }
+            cmd_rop_find(elf, dis, args);
+        }
+        else if (subcmd == "export") {
+            std::string addrs, filename;
+            iss >> addrs >> filename;
+            Disassembler dis;
+            if (!dis.init(elf.is_64bit(), elf.is_little_endian())) {
+                return true;
+            }
+            cmd_rop_export(elf, dis, addrs, filename);
+        }
+        else {
+            std::cout << "ROP subcommands:\n"
+                      << "  rop find [--pop|--syscall|--mov|--chain]   - Find ROP gadgets\n"
+                      << "  rop export <addr1,addr2,...> <filename>   - Export chain to Python\n";
+        }
+    }
     else if (command == "history") {
         cmd_history();
     }
@@ -505,6 +552,75 @@ void print_usage(const char* progname) {
               << "  " << progname << " vuln disas main         # Disassemble main\n";
 }
 
+void cmd_rop_find(ElfParser& elf, Disassembler& dis, const std::string& args) {
+    ROPFinder rop(elf, dis);
+    
+    // Parse arguments
+    GadgetFilter filter;
+    
+    if (args.find("--pop") != std::string::npos) {
+        auto gadgets = rop.find_pop_ret_gadgets();
+        rop.print_gadget_table(gadgets);
+    } else if (args.find("--syscall") != std::string::npos) {
+        auto gadgets = rop.find_syscall_gadgets();
+        rop.print_gadget_table(gadgets);
+    } else if (args.find("--mov") != std::string::npos) {
+        auto gadgets = rop.find_mov_ret_gadgets();
+        rop.print_gadget_table(gadgets);
+    } else if (args.find("--chain") != std::string::npos) {
+        // Build a chain
+        std::vector<std::string> effects = {"pop rdi", "system"};
+        auto chain = rop.build_chain(effects);
+        if (chain) {
+            std::cout << "[+] Built ROP chain:\n";
+            for (const auto& gadget : chain->gadgets) {
+                rop.print_gadget(gadget);
+            }
+            std::cout << "\nPython exploit:\n" << rop.to_python_exploit(*chain);
+        } else {
+            std::cout << "[-] Could not build chain\n";
+        }
+    } else {
+        // Default: find all gadgets
+        auto gadgets = rop.find_gadgets(filter);
+        rop.print_gadget_table(gadgets);
+    }
+}
+
+void cmd_rop_export(ElfParser& elf, Disassembler& dis, 
+                    const std::string& gadget_addresses, const std::string& filename) {
+    ROPFinder rop(elf, dis);
+    
+    // Parse addresses from comma-separated list
+    std::vector<uint64_t> addrs;
+    std::stringstream ss(gadget_addresses);
+    std::string addr_str;
+    while (std::getline(ss, addr_str, ',')) {
+        if (addr_str.substr(0, 2) == "0x") {
+            addrs.push_back(std::stoull(addr_str.substr(2), nullptr, 16));
+        }
+    }
+    
+    if (addrs.empty()) {
+        std::cerr << "Error: No valid addresses provided\n";
+        return;
+    }
+    
+    // Build chain from addresses (would need to lookup gadgets)
+    ROPChain chain;
+    chain.is_valid = true;
+    chain.addresses = addrs;
+    chain.description = "Custom ROP chain";
+    
+    // Export to file
+    std::ofstream file(filename);
+    if (file) {
+        file << rop.to_python_exploit(chain);
+        std::cout << "[+] Exported ROP chain to " << filename << std::endl;
+    } else {
+        std::cerr << "Error: Could not write to " << filename << std::endl;
+    }
+}
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         print_usage(argv[0]);

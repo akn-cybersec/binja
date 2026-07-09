@@ -40,7 +40,7 @@ A lightweight, no-frills ELF analysis tool built for reverse engineers, binary e
 
 ```bash
 # Build
-git clone https://github.com/kaizen_dragon/binja
+git clone https://github.com/akn-cybersec/binja
 cd binja && make
 
 # Drop into interactive REPL
@@ -70,11 +70,12 @@ binja> patch 0x401200 9090
 |---|---|
 | 🔍 **ELF Parsing** | Manual header, section, segment, and symbol table parsing — zero libelf dependency |
 | 📝 **Disassembly** | x86/x86-64 disassembly via Capstone engine |
-| 🔗 **Cross-Reference Finding** | Scans all executable sections for calls/jumps to a target address |
+| 🔗 **Cross-Reference Finding** | Scans `.text` for `call`/`jmp`/`mov`/`j*` instructions whose operand matches a target address |
 | 💾 **Binary Patching** | In-memory and on-disk patching with automatic `.bak` backup creation |
-| 📊 **Protection Analysis** | Detects NX, PIE, Stack Canary, and RELRO |
+| 📊 **Protection Analysis** | Detects NX, PIE, Stack Canary (symbol-based), and RELRO (none/full) |
 | 📜 **String Extraction** | Pulls printable strings from `.rodata` and `.data` |
-| 🎮 **Interactive REPL** | Persistent command history with timestamps, saved to `.binja_history` |
+| 🎮 **Interactive REPL** | Persistent command history (with timestamps in the on-disk history file), saved to `.binja_history` |
+| 🎮 **ROP Gadgets Finder** | Scans executable sections for gadgets ending in `ret` or `syscall`; supports filtering by type (`--pop`, `--mov`, `--syscall`), auto-chain building, and Python exploit export |
 | 🔲 **Hexdump** | Hex + ASCII dump of any section, with optional offset and length |
 | 📋 **Section/Segment Listing** | All ELF sections and program headers with flags and permissions |
 
@@ -110,15 +111,20 @@ cd capstone && ./make.sh && sudo make install
 ### Build binja
 
 ```bash
-# Optimized release build
+# Optimized release build (-O2)
 make
 
-# Debug build (with -g, ASAN, verbose output)
+# Debug build (-g -O0 -DDEBUG, then a clean rebuild)
 make debug
 
 # Clean build artifacts
 make clean
+
+# List available Makefile targets
+make help
 ```
+
+> Note: `make debug` currently just adds `-g -O0 -DDEBUG` on top of the release flags — there's no ASAN/UBSan instrumentation and no extra verbose logging wired up yet. If you want sanitizers, add `-fsanitize=address,undefined` to `DEBUG_FLAGS` in the Makefile yourself for now.
 
 The resulting binary is `./binja`. No install step required — run it from the project directory or copy it somewhere on your `$PATH`.
 
@@ -137,15 +143,16 @@ Launch with a binary path to enter the REPL:
 ```
 
 ```
-[*] Loading: ./target_binary
-[*] ELF64 detected — x86-64
-[*] Loaded 27 sections, 9 segments
-[*] Symbol table: 42 functions resolved
+╔════════════════════════╗
+║         BINJA          ║
+╚════════════════════════╝
+Binary: ./target_binary
+Type 'help' for available commands, 'exit' to quit
 
 binja> _
 ```
 
-The REPL persists command history to `.binja_history` (with timestamps) across sessions.
+The REPL appends every command to `.binja_history` in the current working directory, each entry timestamped, and reloads that file on the next launch so history expansion (`!!`, `!5`) still works across sessions. The `history` command itself just lists the in-session commands by index — it does not print the timestamps (those only live in the `.binja_history` file on disk).
 
 **History expansion:**
 
@@ -153,10 +160,10 @@ The REPL persists command history to `.binja_history` (with timestamps) across s
 |---|---|
 | `!!` | Repeat the last command |
 | `!5` | Repeat command #5 from history |
-| `history` | Show full history with timestamps |
+| `history` | Show in-session command history (no timestamps) |
 
 **Signal handling:**  
-`Ctrl+C` clears the current line and shows a fresh prompt — it does **not** exit. Use `exit` or `quit` to leave.
+`Ctrl+C` does **not** exit — it prints `Type 'exit' to quit` and redraws the prompt. Use `exit` or `quit` (or Ctrl+D / an empty line) to leave.
 
 ---
 
@@ -170,85 +177,79 @@ Run a single command non-interactively — useful for scripting and piping outpu
 ./binja ./binary disas main
 ./binja ./binary strings 6
 ./binja ./binary xrefs 0x401234
-./binja ./binary hexdump .rodata 0 64
 ```
+
+> `hexdump`, `sections`, and `segments` are currently only wired up in interactive mode — see [Limitations](#limitations).
 
 ---
 
 ### Command Reference
 
 #### `info`
-Display ELF metadata: entry point, architecture, class, endianness, section count, and detected binary protections.
+Display ELF metadata: entry point, architecture, endianness, a list of known section names, and detected binary protections.
 
 ```
 binja> info
 
-  File:        ./vuln
-  Format:      ELF64 (Little Endian)
-  Entry Point: 0x401080
-  Sections:    27
-  Segments:    9
-
-  [Protections]
-  NX:           Enabled
-  PIE:          Disabled
-  Stack Canary: Disabled
-  RELRO:        Partial
+Entry point: 0x401080
+Architecture: x86-64
+Endianness: little
+Sections: .text, .rodata, .data, .bss, .symtab, .strtab, .shstrtab, .comment, .note.gnu.build-id, .eh_frame...
+Protections: NX: yes, PIE: no, Canary: no, RELRO: none
 ```
+
+> The section list comes from an internal hash map, so the order you see is arbitrary, not file order — and it's truncated to 10 entries with a trailing `...` if there are more.
 
 ---
 
 #### `functions`
-List all function symbols with their virtual addresses and sizes.
+List all function symbols with their virtual addresses and sizes, sorted by address.
 
 ```
 binja> functions
 
-  [Functions — 12 resolved]
-  0x401080   _start               (48 bytes)
-  0x4010b0   __libc_csu_init      (101 bytes)
-  0x401156   main                 (78 bytes)
-  0x4011a4   vuln                 (63 bytes)
-  0x4011e3   win                  (31 bytes)
+0x00401080 _start
+0x004010b0 __libc_csu_init (size: 101)
+0x00401156 main (size: 78)
+0x004011a4 vuln (size: 63)
+0x004011e3 win (size: 31)
 ```
 
-> **Note:** If the binary is stripped, `functions` will show an empty list. Use `disas 0x<address>` to disassemble by address directly.
+If the binary has no `.symtab`/`.dynsym` FUNC entries it prints `No functions found (binary may be stripped)`. Use `disas 0x<address>` to disassemble by address directly in that case.
 
 ---
 
 #### `strings [min_len]`
-Extract printable strings from `.rodata` and `.data`. Default minimum length is 4.
+Extract printable strings from `.rodata` and `.data` only. Default minimum length is 4. Output is just the raw strings, one per line — no addresses or section labels.
 
 ```
 binja> strings 6
 
-  [Strings — .rodata]
-  0x402004   "Enter your name: "
-  0x402016   "Hello, %s!\n"
-  0x402022   "cat /flag"
-  0x40202c   "/bin/sh"
+Enter your name: 
+Hello, %s!
+cat /flag
+/bin/sh
 ```
 
 ---
 
 #### `disas <function_name|address>`
-Disassemble a function by name or by hex address.
+Disassemble a function by name (looked up in the symbol table) or by hex address. Internally this always locates the containing `.text` section, so functions living outside `.text` (e.g. in `.init`/`.plt`) won't disassemble correctly yet.
 
 ```
 binja> disas vuln
 
-  [Disassembly — vuln @ 0x4011a4]
-  0x4011a4:  push   rbp
-  0x4011a5:  mov    rbp, rsp
-  0x4011a8:  sub    rsp, 0x40
-  0x4011ac:  lea    rax, [rbp-0x40]
-  0x4011b0:  mov    rsi, rax
-  0x4011b3:  lea    rdi, [rip+0x84e]
-  0x4011ba:  mov    eax, 0x0
-  0x4011bf:  call   0x401060 <scanf@plt>
-  0x4011c4:  nop
-  0x4011c5:  leave
-  0x4011c6:  ret
+0x004011a4:	push rbp
+0x004011a5:	mov rbp, rsp
+0x004011a8:	sub rsp, 0x40
+0x004011ac:	lea rax, [rbp - 0x40]
+0x004011b0:	mov rsi, rax
+0x004011b3:	lea rdi, [rip + 0x84e]
+0x004011ba:	mov eax, 0
+0x004011bf:	call 0x401060
+0x004011c4:	nop
+0x004011c5:	leave
+0x004011c6:	ret
 ```
 
 ```bash
@@ -256,32 +257,33 @@ binja> disas vuln
 ./binja ./binary disas 0x4011a4
 ```
 
+If the name isn't found, binja prints every known function name/address as a suggestion list.
+
 ---
 
 #### `xrefs <address>`
-Scan all executable sections for instructions that call or jump to the target address. Useful for identifying every caller of a function.
+Scan the disassembled `.text` section for `call`, `jmp`, `mov`, or any `j*`-mnemonic instruction whose operand string contains the target address in hex. Address must be given in hex (`0x...`).
 
 ```
 binja> xrefs 0x4011e3
 
-  [Cross-References to 0x4011e3]
-  0x401200:  call   0x4011e3    (in section .text)
-  0x40123a:  jmp    0x4011e3    (in section .text)
-
-  2 reference(s) found.
+0x401200: call 0x4011e3
+0x40123a: jmp 0x4011e3
 ```
+
+If nothing matches, binja prints `No cross-references found to 0x...`. Note this is a textual match against the disassembled operand string, not a real data-flow/relocation analysis — it won't catch references built up across multiple instructions (e.g. `lea`+`mov` address computation) or references outside `.text`.
 
 ---
 
 #### `patch <address> <hex_bytes>`
-Patch the binary in memory and on disk at the given address with the provided hex byte string. A `.bak` backup of the original file is created automatically before the first write.
+Patch the binary in memory and on disk at the given address with the provided hex byte string. A `.bak` backup of the original file is created automatically before the first write (interactive and CLI modes both hardcode backups on).
 
 ```
 binja> patch 0x4011bf 9090
 
-  [*] Backup created: ./vuln.bak
-  [*] Patching 0x4011bf — wrote 2 byte(s)
-  [+] Done. Verify with: disas vuln
+Patching at offset 0x11bf (2 bytes)
+Backed up original to ./vuln.bak
+Patched 2 bytes at 0x4011bf
 ```
 
 ```bash
@@ -292,80 +294,75 @@ binja> patch 0x4011bf 9090909090
 binja> patch 0x401200 eb0e
 ```
 
-> ⚠️ Patches are written to disk. The `.bak` file is your safety net — keep it until you are sure the patch is correct.
+> ⚠️ Patches are written to disk immediately. The `.bak` file is your safety net — keep it until you are sure the patch is correct.
 
 ---
 
-#### `hexdump <section> [offset] [length]`
-Dump section data in hex + ASCII format. Offset and length are optional.
+#### `hexdump <section> [offset] [length]` — *interactive mode only*
+Dump section data in hex + ASCII format. Offset and length are optional (defaults: offset `0`, length `256`).
 
 ```
 binja> hexdump .rodata 0 64
 
-  [Hexdump — .rodata  offset=0  length=64]
-  00000000  45 6e 74 65 72 20 79 6f  75 72 20 6e 61 6d 65 3a  |Enter your name:|
-  00000010  20 00 48 65 6c 6c 6f 2c  20 25 73 21 0a 00 63 61  | .Hello, %s!..ca|
-  00000020  74 20 2f 66 6c 61 67 00  2f 62 69 6e 2f 73 68 00  |t /flag./bin/sh.|
-  00000030  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  |................|
+0x00000000: 45 6e 74 65 72 20 79 6f  75 72 20 6e 61 6d 65 3a   |Enter your name:|
+0x00000010: 20 00 48 65 6c 6c 6f 2c  20 25 73 21 0a 00 63 61   | .Hello, %s!..ca|
+0x00000020: 74 20 2f 66 6c 61 67 00  2f 62 69 6e 2f 73 68 00   |t /flag./bin/sh.|
+0x00000030: 00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00   |................|
 ```
 
 ---
 
-#### `sections`
-List all ELF sections with addresses, sizes, and flags.
+#### `sections` — *interactive mode only*
+List all ELF sections known to binja (from its internal name map) with address, size, offset, and flags.
 
 ```
 binja> sections
 
-  [Sections — 27 total]
-  Idx  Name              Address            Size     Flags
-  ---  ----              -------            ----     -----
-    1  .text             0x0000000000401080 0x01a3   AX
-    2  .rodata           0x0000000000402000 0x0060   A
-    3  .data             0x0000000000404000 0x0010   WA
-    4  .bss              0x0000000000404010 0x0008   WA
-    5  .symtab           0x0000000000000000 0x0240   
-    6  .strtab           0x0000000000000000 0x00e1   
-  ...
+Sections in binary:
+  .text                addr=0x0000000000401080 size=0x1a3 offset=0x1080 [EXEC]
+  .rodata               addr=0x0000000000402000 size=0x60 offset=0x2000
+  .data                 addr=0x0000000000404000 size=0x10 offset=0x3e00 [WRITE]
+  .bss                  addr=0x0000000000404010 size=0x8 offset=0x3e10 [WRITE]
+  .symtab               addr=0x0000000000000000 size=0x240 offset=0x4000
+  .strtab               addr=0x0000000000000000 size=0xe1 offset=0x4240
 ```
 
 ---
 
-#### `segments`
-List program headers (PT_LOAD, PT_GNU_STACK, etc.) with virtual addresses, sizes, and permissions.
+#### `segments` — *interactive mode only*
+List program headers with offsets, virtual/physical addresses, sizes, and permission flags. Type names are printed without the `PT_` prefix (`LOAD`, `DYNAMIC`, `GNU_STACK`, `GNU_RELRO`, `INTERP`, or `UNKNOWN`).
 
 ```
 binja> segments
 
-  [Segments — 9 total]
-  Type            VirtAddr           FileSiz    MemSiz     Flags
-  ----            --------           -------    ------     -----
-  PT_LOAD         0x0000000000400000 0x000002e8 0x000002e8 R
-  PT_LOAD         0x0000000000401000 0x000001a3 0x000001a3 R E
-  PT_LOAD         0x0000000000402000 0x000000c4 0x000000c4 R
-  PT_LOAD         0x0000000000403e00 0x0000022c 0x0000023c R W
-  PT_GNU_STACK    0x0000000000000000 0x00000000 0x00000000 R W
+Program segments:
+  Type           Offset   VirtAddr   PhysAddr   FileSiz  MemSiz   Flags Align
+  LOAD           0x000000 0x00400000 0x00400000 0x0002e8 0x0002e8 R     0x1000
+  LOAD           0x001000 0x00401000 0x00401000 0x0001a3 0x0001a3 R E   0x1000
+  LOAD           0x002000 0x00402000 0x00402000 0x0000c4 0x0000c4 R     0x1000
+  LOAD           0x003e00 0x00403e00 0x00403e00 0x00022c 0x00023c RW    0x1000
+  GNU_STACK      0x000000 0x00000000 0x00000000 0x000000 0x000000 RW    0x10
 ```
 
 ---
 
-#### `history`
-Show the full command history with timestamps.
+#### `history` — *interactive mode only*
+Show the in-session command history by index (no timestamps — those are only recorded in the `.binja_history` file on disk).
 
 ```
 binja> history
 
-  [Command History]
-  1  [2025-11-14 02:11:33]  info
-  2  [2025-11-14 02:11:40]  functions
-  3  [2025-11-14 02:11:48]  disas vuln
-  4  [2025-11-14 02:12:01]  xrefs 0x4011e3
-  5  [2025-11-14 02:12:15]  patch 0x4011bf 9090909090
+Command history:
+  1  info
+  2  functions
+  3  disas vuln
+  4  xrefs 0x4011e3
+  5  patch 0x4011bf 9090
 ```
 
 ---
 
-#### `help`
+#### `help` — *interactive mode only*
 Display command reference and usage hints in the REPL.
 
 #### `exit` / `quit`
@@ -408,8 +405,8 @@ binja> xrefs 0x4011a4
 
 ```bash
 binja> disas check_auth
-# 0x401320:  test   eax, eax
-# 0x401322:  jne    0x401380   <-- jump if auth fails
+# 0x401320: test eax, eax
+# 0x401322: jne 0x401380   <-- jump if auth fails
 
 # Patch jne (75 XX) to jmp (eb XX) to always take the branch
 binja> patch 0x401322 eb5c
@@ -424,7 +421,7 @@ binja> disas check_auth
 
 ```bash
 binja> functions
-# 0x4011e3   win   (31 bytes)
+# 0x4011e3   win   (size: 31)
 
 binja> disas win
 # confirm it calls system("/bin/sh") or similar
@@ -454,7 +451,7 @@ binja> disas main
 binja> disas vuln
 binja> !!         # re-runs: disas vuln
 binja> !1         # re-runs: disas main
-binja> history    # review full session
+binja> history    # review in-session history
 ```
 
 ---
@@ -487,11 +484,11 @@ binja is built around four cooperating modules:
                            └─────────────────┘
 ```
 
-**ELF parsing** is done entirely by hand — `Elf64_Ehdr`, `Elf64_Shdr`, `Elf64_Phdr`, `Elf64_Sym` structs are read directly from the mapped file. No libelf, no BFD, no external parsing library.
+**ELF parsing** is done entirely by hand — `Elf64_Ehdr`, `Elf64_Shdr`, `Elf64_Phdr`, `Elf64_Sym` structs (plus 32-bit equivalents, upconverted into the 64-bit structs) are read directly from the `mmap`'d file. No libelf, no BFD, no external parsing library.
 
-**Disassembly** wraps the Capstone C API in a thin C++ class. `cs_open`, `cs_disasm`, and `cs_close` handle the lifecycle; the xref scanner iterates over all `SHF_EXECINSTR` sections and checks each decoded instruction's operands against the target address.
+**Disassembly** wraps the Capstone C API in a thin C++ class. `cs_open`, `cs_disasm`, and `cs_close` handle the lifecycle; the xref scanner disassembles the entire `.text` section up front and then string-matches each decoded instruction's operand text against the target address in hex.
 
-**Patching** uses `mmap`/`fseek`+`fwrite` to overwrite bytes at the file offset corresponding to a given virtual address, computed by walking the PT_LOAD segments to find the correct `p_offset` + `(vaddr - p_vaddr)` translation.
+**Patching** uses standard `std::fstream` seek/write (`patch_file` opens the target in `ios::binary | ios::in | ios::out`, `seekp`s to the computed offset, and writes the new bytes) to overwrite bytes at the file offset corresponding to a given virtual address. That offset is computed by `virtual_to_offset`, which walks the `PT_LOAD` segments to find the matching `p_offset + (vaddr - p_vaddr)` translation — it does not use `mmap` for writing.
 
 ---
 
@@ -503,10 +500,10 @@ binja/
 ├── elf_parser.cpp      # Manual ELF parsing: headers, sections, symbols, strings, protections
 ├── disassembler.cpp    # Capstone wrapper: disassembly engine, xref scanning
 ├── patcher.cpp         # Binary patching with .bak backup creation
-├── elf_parser.h        # ELFParser class definition
+├── elf_parser.h        # ElfParser class definition
 ├── disassembler.h      # Disassembler class definition
 ├── patcher.h           # Patcher class definition
-├── Makefile            # Build system: release / debug / clean targets
+├── Makefile            # Build system: release / debug / clean / help targets
 └── README.md
 ```
 
@@ -516,9 +513,15 @@ binja/
 
 - **ELF only** — no PE (Windows) or Mach-O (macOS) support
 - **x86 / x86-64** — Capstone supports other archs but binja's section logic is currently wired for these two; other architectures will fail gracefully
-- **Limited 32-bit testing** — 32-bit ELF parsing is implemented but less battle-tested than 64-bit
+- **Limited 32-bit testing** — 32-bit ELF parsing is implemented (structs are upconverted to 64-bit internally) but less battle-tested than 64-bit
+- **RELRO detection is binary** — `check_protections()` currently only reports `"none"` or `"full"` (it sets `full` whenever a `PT_GNU_RELRO` segment exists); there's no partial-RELRO distinction yet
+- **Stack canary detection is symbol-based** — it looks for a `__stack_chk_fail` symbol in `.symtab`/`.dynsym`, so a canary-protected but fully stripped binary can show a false negative
+- **ASLR/exec-stack fields aren't surfaced** — `ProtectionInfo` has `aslr`/`execstack` members but nothing currently populates or prints them
+- **`xrefs` is a textual match, not real data-flow analysis** — it only catches references that appear as a literal hex operand on a `call`/`jmp`/`mov`/`j*` instruction within `.text`
+- **`disas` is hardcoded to `.text`** — functions outside `.text` (PLT stubs, `.init`, etc.) aren't handled
+- **`hexdump`, `sections`, and `segments` are interactive-only** — they aren't wired into command-line (one-shot) mode yet
+- **Dynamic section parsing is a stub** — `get_dynamic_entry()` and `get_plt_addresses()` are unimplemented placeholders that always return empty/zero; `get_imported_symbols()`/`get_exported_symbols()` exist but aren't exposed through any CLI command yet
 - **No DWARF parsing** — debug info (file/line mapping) is not read; stripped binaries show addresses only
-- **No ROP gadget search** — planned for a future release
 - **No dynamic analysis** — static analysis only; no tracing, no emulation
 
 ---
@@ -528,10 +531,10 @@ binja/
 | Error | Cause | Fix |
 |---|---|---|
 | `Cannot resolve address 0x...` | Address falls outside all PT_LOAD segments | Verify the address with `segments`; make sure the binary is not PIE with ASLR active |
-| `Function not found: foo` | Binary is stripped, no `.symtab` | Use `disas 0x<address>` directly |
+| Function not found, list of suggestions printed | Binary is stripped, no `.symtab`/`.dynsym` FUNC entries | Use `disas 0x<address>` directly |
 | `Capstone init failed` | Missing or incorrect Capstone install | Run `ldd ./binja` and check `libcapstone.so` resolves |
 | `Permission denied` when patching | File is read-only | `chmod u+w ./target` before patching |
-| History not saved | `.binja_history` not writable in CWD | Run binja from a directory you own |
+| `.binja_history` not updating | Directory not writable | Run binja from a directory you own |
 
 ---
 
@@ -544,18 +547,17 @@ binja is not a replacement for radare2, Ghidra, or Binary Ninja (the commercial 
 | ELF section/segment listing | ✅ | ✅ | ✅ | ✅ |
 | Disassembly | ✅ | ❌ | ✅ | ✅ |
 | Symbol table listing | ✅ | ✅ | ✅ | ✅ |
-| Cross-reference finder | ✅ | ❌ | ❌ | ✅ |
+| Cross-reference finder | ✅ (text-match) | ❌ | ❌ | ✅ |
 | Binary patching (with backup) | ✅ | ❌ | ❌ | ✅ |
-| Protection analysis | ✅ | Partial | ❌ | ✅ |
+| Protection analysis | ✅ (NX/PIE/Canary/RELRO) | Partial | ❌ | ✅ |
 | Interactive REPL w/ history | ✅ | ❌ | ❌ | ✅ |
 | String extraction | ✅ | ❌ | ✅ | ✅ |
 | Scripting / API | ❌ | ❌ | ❌ | ✅ |
 | Dependency count | 1 (capstone) | 0 | 0 | Many |
-| Binary size | ~100KB | ~50KB | ~200KB | >10MB |
 
 **Use binja when:** you want fast answers in a CTF, you are writing exploit scripts and want quick one-liners, or you just don't want to wait for radare2 to load.
 
-**Use radare2/Ghidra/Binary Ninja when:** you need decompilation, advanced scripting, graph views, or analysis of non-ELF formats.
+**Use radare2/Ghidra/Binary Ninja when:** you need decompilation, advanced scripting, graph views, partial-RELRO/ASLR-aware protection reports, or analysis of non-ELF formats.
 
 ---
 
@@ -563,13 +565,14 @@ binja is not a replacement for radare2, Ghidra, or Binary Ninja (the commercial 
 
 ```
 1. Start with `info` — know your protections before anything else.
-   PIE + Full RELRO + Canary changes everything about your exploit path.
+   Remember RELRO here is only ever "none" or "full" right now.
 
 2. `strings` before `disas` — a /bin/sh or a flag path tells you
    immediately what the intended vector is.
 
-3. Use `xrefs` to trace data flow backward — find every site that
-   calls into a vulnerable function before you assume it's unreachable.
+3. Use `xrefs` to trace data flow backward — but remember it's a
+   text match on .text operands, so double-check anything subtle
+   (e.g. address built via lea + separate mov) by hand.
 
 4. Keep patches surgical — NOP the minimum number of bytes,
    verify with `disas` after every patch.
@@ -591,8 +594,9 @@ Bug reports, feature requests, and pull requests are welcome.
 - Match the existing code style (C++17, no STL containers in the hot path if avoidable)
 
 **Planned / good-first-issue features:**
-- ROP gadget finder
-- GOT/PLT table display
+- Partial-RELRO detection (currently collapsed to none/full)
+- GOT/PLT table display (`get_plt_addresses`/`get_dynamic_entry` are stubs today)
+- Wire `hexdump`/`sections`/`segments` into command-line (non-interactive) mode
 - 32-bit ELF test suite
 - DWARF line info parsing (basic)
 - JSON output mode for scripting integration
