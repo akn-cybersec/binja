@@ -21,9 +21,9 @@ A lightweight, no-frills ELF analysis tool built for reverse engineers, binary e
 - [Features](#features)
 - [Installation & Build](#installation--build)
 - [Usage](#usage)
-  - [Interactive Mode](#interactive-mode)
-  - [Command-Line Mode](#command-line-mode)
-  - [Command Reference](#command-reference)
+- [Interactive Mode](#interactive-mode)
+- [Command-Line Mode](#command-line-mode)
+- [Command Reference](#command-reference)
 - [Examples & Workflows](#examples--workflows)
 - [Architecture & Internals](#architecture--internals)
 - [Project Structure](#project-structure)
@@ -619,7 +619,8 @@ Do not use binja to analyze or patch binaries without authorization. The authors
 
 ## Author
 > **"Trust The Process" — My Princess**
-**kaizen_dragon**
+
+> **kaizen_dragon**
 
 ---
 
