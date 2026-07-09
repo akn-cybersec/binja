@@ -382,6 +382,7 @@ binja> sections     # Identify interesting sections
 binja> segments     # Check NX (PT_GNU_STACK flags)
 binja> functions    # What's in the symbol table?
 binja> strings 5    # Any juicy strings? /bin/sh? flag paths?
+binja> rop find --ret # Any gadgets having ret
 ```
 
 ---
