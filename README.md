@@ -60,6 +60,7 @@ binja> functions
 binja> disas vuln_func
 binja> xrefs 0x401234
 binja> patch 0x401200 9090
+binja> rop find --ret
 ```
 
 ---
