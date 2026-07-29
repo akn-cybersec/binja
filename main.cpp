@@ -11,6 +11,18 @@
 #include <chrono>
 #include <ctime>
 #include <signal.h>
+#include <unistd.h>
+#include <cstring>
+
+// Stamped at build time via -DBINJA_VERSION / -DBINJA_BUILD_INFO in the Makefile.
+// Falls back to these defaults if built without the Makefile (e.g. a raw g++ invocation),
+// so `binja --version` always prints something useful for debugging stale installs.
+#ifndef BINJA_VERSION
+#define BINJA_VERSION "dev"
+#endif
+#ifndef BINJA_BUILD_INFO
+#define BINJA_BUILD_INFO "unknown-build"
+#endif
 
 // Global for signal handling
 ElfParser* g_current_elf = nullptr;
@@ -23,6 +35,7 @@ size_t history_index = 0;
 // Function prototypes
 // Function prototypes
 void print_usage(const char* progname);
+void print_version();
 void print_interactive_help();
 void save_to_history(const std::string& cmd);
 void load_history();
@@ -288,6 +301,7 @@ void print_interactive_help() {
               << "  segments                          - List program segments\n"
               << "  rop find [--pop|--syscall|--mov]  - Find ROP gadgets\n"
               << "  rop export <addrs> <file>         - Export ROP chain\n"
+              << "  version                           - Show binja version/build info\n"
               << "  help                              - Show this help\n"
               << "  history                           - Show command history\n"
               << "  !<n>                              - Repeat command n from history\n"
@@ -343,10 +357,16 @@ void add_to_history(const std::string& cmd) {
     save_to_history(cmd);
 }
 
+
 std::string get_input() {
     std::string input;
-    std::cout << "binja> ";
-    std::fflush(stdout);
+    const char* blue = "\033[0;34m";
+    const char* reset = "\033[0m";
+    const char* prompt = "binja> ";
+    
+    write(STDOUT_FILENO, blue, strlen(blue));
+    write(STDOUT_FILENO, prompt, strlen(prompt));
+    write(STDOUT_FILENO, reset, strlen(reset));
     
     if (!std::getline(std::cin, input)) {
         return "exit";
@@ -358,7 +378,14 @@ std::string get_input() {
 void signal_handler(int sig) {
     if (sig == SIGINT) {
         std::cout << "\nType 'exit' to quit\n";
-        std::cout << "binja> " << std::flush;
+        
+        const char* blue = "\033[0;34m";
+        const char* reset = "\033[0m";
+        const char* prompt = "binja> ";
+        
+        write(STDOUT_FILENO, blue, strlen(blue));
+        write(STDOUT_FILENO, prompt, strlen(prompt));
+        write(STDOUT_FILENO, reset, strlen(reset));
     }
 }
 
@@ -399,6 +426,9 @@ bool execute_command(ElfParser& elf, const std::string& input) {
     }
     else if (command == "help") {
         print_interactive_help();
+    }
+    else if (command == "version") {
+        print_version();
     }
     else if (command == "info") {
         cmd_info(elf);
@@ -532,6 +562,10 @@ void interactive_mode(ElfParser& elf, const std::string& binary_name) {
     g_current_elf = nullptr;
 }
 
+void print_version() {
+    std::cout << "binja " << BINJA_VERSION << " (" << BINJA_BUILD_INFO << ")\n";
+}
+
 void print_usage(const char* progname) {
     std::cout << "Usage: " << progname << " [binary] [command] [args...]\n\n"
               << "Interactive Mode:\n"
@@ -546,10 +580,13 @@ void print_usage(const char* progname) {
               << "  xrefs <address>               Find cross-references to address\n"
               << "  patch <address> <hex_bytes>   Patch binary at address\n"
               << "  help                          Show this help\n\n"
+              << "Other flags:\n"
+              << "  --version, -v                 Print version/build info and exit\n\n"
               << "Examples:\n"
               << "  " << progname << " vuln info               # Command mode\n"
               << "  " << progname << " vuln                    # Interactive mode\n"
-              << "  " << progname << " vuln disas main         # Disassemble main\n";
+              << "  " << progname << " vuln disas main         # Disassemble main\n"
+              << "  " << progname << " --version                # Check which build is running\n";
 }
 
 void cmd_rop_find(ElfParser& elf, Disassembler& dis, const std::string& args) {
@@ -622,6 +659,14 @@ void cmd_rop_export(ElfParser& elf, Disassembler& dis,
     }
 }
 int main(int argc, char* argv[]) {
+    // Handle --version / -v first so it works with no binary argument at all.
+    // This is the fastest way to confirm which binja binary/build is actually
+    // running, e.g. when PATH has multiple installs shadowing each other.
+    if (argc >= 2 && (std::string(argv[1]) == "--version" || std::string(argv[1]) == "-v")) {
+        print_version();
+        return 0;
+    }
+
     if (argc < 2) {
         print_usage(argv[0]);
         return 1;
@@ -683,6 +728,9 @@ int main(int argc, char* argv[]) {
     }
     else if (command == "help") {
         print_usage(argv[0]);
+    }
+    else if (command == "version") {
+        print_version();
     }
     else {
         std::cerr << "Error: Unknown command '" << command << "'\n";
