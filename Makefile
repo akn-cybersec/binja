@@ -1,11 +1,14 @@
 # Compiler and flags
 CXX = g++
 CXXFLAGS = -std=c++17 -Wall -Wextra -O2
-GIT_HASH := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown) # versioning: get the short git hash or 'unknown' if not in a git repo
-BUILD_DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
-CXXFLAGS += -DBINJA_VERSION=\"$(GIT_HASH)\" -DBINJA_BUILD_INFO=\"built-$(BUILD_DATE)\"
 DEBUG_FLAGS = -g -O0 -DDEBUG
 LDFLAGS = -lcapstone
+
+# Versioning >_<
+VERSION := $(shell cat VERSION 2>/dev/null | tr -d '[:space:]' || echo 0.0.0)
+GIT_HASH := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+BUILD_DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+CXXFLAGS += -DBINJA_VERSION=\"$(VERSION)\" -DBINJA_BUILD_INFO=\"$(GIT_HASH)-$(BUILD_DATE)\"
 
 # Target and sources
 TARGET = binja
