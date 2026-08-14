@@ -265,7 +265,7 @@ binja -v
 Example output:
 
 ```
-binja 2.0 (4df5d3a-2026-08-13T10:12:00Z)
+binja 1.1 (4df5d3a-2026-08-13T10:12:00Z)
 ```
 
 To release a new version, update `VERSION` and commit it alongside your other changes:
