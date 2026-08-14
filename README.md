@@ -1,4 +1,4 @@
-# binja — Binary Analysis Tool for ELF Files
+# binja - ELF Binary Analysis and Patching Tool
 
 ```
 ██████╗ ██╗███╗   ██╗     ██╗ █████╗
@@ -10,49 +10,54 @@
    ELF Binary Analysis & Patching Tool
 ```
 
-
-A lightweight, no-frills ELF analysis tool built for reverse engineers, binary exploit developers, and CTF players. No bloat, no GUI, no libelf dependency — just raw ELF parsing, Capstone-powered disassembly, and a clean interactive REPL.
+binja is a focused command-line tool for static analysis and patching of ELF binaries. It provides manual ELF parsing, Capstone-powered disassembly, cross-reference scanning, ROP gadget discovery, and patching utilities via an interactive REPL or single-command invocation.
 
 ---
 
 ## Table of Contents
 
-- [Quick Start](#quick-start)
-- [Features](#features)
-- [Installation & Build](#installation--build)
-- [Usage](#usage)
-- [Interactive Mode](#interactive-mode)
-- [Command-Line Mode](#command-line-mode)
-- [Command Reference](#command-reference)
-- [Examples & Workflows](#examples--workflows)
-- [Architecture & Internals](#architecture--internals)
-- [Project Structure](#project-structure)
-- [Limitations](#limitations)
-- [Troubleshooting](#troubleshooting)
-- [Comparison to Other Tools](#comparison-to-other-tools)
-- [Contributing](#contributing)
-- [Security Notice](#security-notice)
-- [License](#license)
+- Quick Start
+- Features
+- Installation and Build
+- Usage
+- Command Reference
+- Examples and Workflows
+- Architecture and Internals
+- Project Structure
+- Versioning
+- Upgrading
+- Limitations
+- Troubleshooting
+- Comparison to Other Tools
+- Contributing
+- Security Notice
+- Author
+- License
 
 ---
 
 ## Quick Start
 
 ```bash
-# Build
+# Clone and build (no root needed to build)
 git clone https://github.com/akn-cybersec/binja
-cd binja && sudo make
+cd binja
+make
 
-# Drop into interactive REPL
-./binja ./target_binary
+# Optional: install system-wide so 'binja' works from anywhere
+sudo make install
 
-# One-shot command
+# Run
+binja ./target_binary            # if installed
+./binja ./target_binary          # from the build directory
+
+# One-shot commands
 ./binja ./target_binary info
 ./binja ./target_binary disas main
 ./binja ./target_binary strings 6
 ```
 
-Common workflow for a CTF binary:
+Common workflow example:
 
 ```
 binja> info
@@ -69,26 +74,27 @@ binja> rop find --ret
 
 | Feature | Description |
 |---|---|
-| 🔍 **ELF Parsing** | Manual header, section, segment, and symbol table parsing — zero libelf dependency |
-| 📝 **Disassembly** | x86/x86-64 disassembly via Capstone engine |
-| 🔗 **Cross-Reference Finding** | Scans `.text` for `call`/`jmp`/`mov`/`j*` instructions whose operand matches a target address |
-| 💾 **Binary Patching** | In-memory and on-disk patching with automatic `.bak` backup creation |
-| 📊 **Protection Analysis** | Detects NX, PIE, Stack Canary (symbol-based), and RELRO (none/full) |
-| 📜 **String Extraction** | Pulls printable strings from `.rodata` and `.data` |
-| 🎮 **Interactive REPL** | Persistent command history (with timestamps in the on-disk history file), saved to `.binja_history` |
-| 🎮 **ROP Gadgets Finder** | Scans executable sections for gadgets ending in `ret` or `syscall`; supports filtering by type (`--pop`, `--mov`, `--syscall`), auto-chain building, and Python exploit export |
-| 🔲 **Hexdump** | Hex + ASCII dump of any section, with optional offset and length |
-| 📋 **Section/Segment Listing** | All ELF sections and program headers with flags and permissions |
+| ELF parsing | Manual header, section, segment, and symbol table parsing (no libelf dependency) |
+| Disassembly | x86 / x86-64 disassembly using the Capstone framework |
+| Cross-reference scanning | Scans `.text` for `call`, `jmp`, `mov`, and other branch instructions whose operand text matches a target address |
+| Binary patching | In-memory and on-disk patching with automatic `.bak` backup creation |
+| Protection analysis | Detects NX, PIE, stack canary (symbol-based), and RELRO (none/full) |
+| String extraction | Extracts printable strings from `.rodata` and `.data` |
+| Interactive REPL | Persistent command history stored in `.binja_history` |
+| ROP gadget finder | Scans executable sections for gadgets (e.g. `ret`, `syscall`) with filtering options and Python exploit export |
+| Hexdump | Hex and ASCII dump of any section with optional offset and length |
+| Section/segment listing | Lists ELF sections and program headers with flags and permissions |
+| Version info | `binja --version` reports the release version, git commit, and build timestamp |
 
 ---
 
-## Installation & Build
+## Installation and Build
 
 ### Dependencies
 
 - Linux x86-64
 - GCC or Clang with C++17 support
-- [Capstone](http://www.capstone-engine.org/) disassembly framework
+- Capstone disassembly framework
 - GNU Make
 
 ### Install Capstone
@@ -112,11 +118,17 @@ cd capstone && ./make.sh && sudo make install
 ### Build binja
 
 ```bash
-# Optimized release build (-O2)
+# Optimized release build (no root required)
 make
 
-# Debug build (-g -O0 -DDEBUG, then a clean rebuild)
+# Debug build
 make debug
+
+# Install to $PREFIX/bin (defaults to /usr/bin, requires root)
+sudo make install
+
+# Remove an installed copy
+sudo make uninstall
 
 # Clean build artifacts
 make clean
@@ -125,372 +137,96 @@ make clean
 make help
 ```
 
-> Note: `make debug` currently just adds `-g -O0 -DDEBUG` on top of the release flags — there's no ASAN/UBSan instrumentation and no extra verbose logging wired up yet. If you want sanitizers, add `-fsanitize=address,undefined` to `DEBUG_FLAGS` in the Makefile yourself for now.
+Note: `make debug` sets `-g -O0 -DDEBUG` in addition to the release flags. To enable sanitizers, add `-fsanitize=address,undefined` to `DEBUG_FLAGS` in the Makefile.
 
-The resulting binary is `./binja`. No install step required — run it from the project directory or copy it somewhere on your `$PATH`.
+The resulting binary is `./binja` in the project directory. You can run it directly from there, or run `sudo make install` to copy it to `$(PREFIX)/bin` so it's available system-wide as `binja`. Custom prefix example: `sudo make install PREFIX=/usr/local`.
+
+If you have previously installed binja to a different prefix, remove the old binary first to avoid one copy silently shadowing the other on your `PATH`:
+
+```bash
+which -a binja
+sudo rm /path/to/old/binja
+```
 
 ---
 
 ## Usage
 
-binja has two operating modes: **interactive** and **command-line**.
+binja supports two operating modes: interactive REPL and single-command (non-interactive) mode.
 
 ### Interactive Mode
 
-Launch with a binary path to enter the REPL:
+Start the REPL by supplying a target binary:
 
 ```bash
 ./binja ./target_binary
 ```
 
-```
-╔════════════════════════╗
-║         BINJA          ║
-╚════════════════════════╝
-Binary: ./target_binary
-Type 'help' for available commands, 'exit' to quit
+The REPL records commands to `.binja_history` in the current working directory. The in-session `history` command displays the recent session commands by index; timestamps are stored in the on-disk history file.
 
-binja> _
-```
-
-The REPL appends every command to `.binja_history` in the current working directory, each entry timestamped, and reloads that file on the next launch so history expansion (`!!`, `!5`) still works across sessions. The `history` command itself just lists the in-session commands by index — it does not print the timestamps (those only live in the `.binja_history` file on disk).
-
-**History expansion:**
-
-| Shorthand | Action |
-|---|---|
-| `!!` | Repeat the last command |
-| `!5` | Repeat command #5 from history |
-| `history` | Show in-session command history (no timestamps) |
-
-**Signal handling:**  
-`Ctrl+C` does **not** exit — it prints `Type 'exit' to quit` and redraws the prompt. Use `exit` or `quit` (or Ctrl+D / an empty line) to leave.
-
----
+Signal handling: `Ctrl+C` does not exit the REPL; use `exit`, `quit`, `Ctrl+D`, or an empty line to leave.
 
 ### Command-Line Mode
 
-Run a single command non-interactively — useful for scripting and piping output:
+Run a single command non-interactively for scripting and automation:
 
 ```bash
 ./binja ./binary info
 ./binja ./binary functions
 ./binja ./binary disas main
 ./binja ./binary strings 6
-./binja ./binary xrefs 0x401234
 ```
 
-> `hexdump`, `sections`, and `segments` are currently only wired up in interactive mode — see [Limitations](#limitations).
+Note: `hexdump`, `sections`, and `segments` are currently available only in interactive mode.
 
 ---
 
-### Command Reference
+## Command Reference
 
-#### `info`
-Display ELF metadata: entry point, architecture, endianness, a list of known section names, and detected binary protections.
+This project includes commands such as `info`, `functions`, `disas`, `xrefs`, `patch`, `strings`, `hexdump`, `sections`, `segments`, `rop`, and `version`. See the in-REPL `help` for full usage and examples.
 
-```
-binja> info
+Key commands:
 
-Entry point: 0x401080
-Architecture: x86-64
-Endianness: little
-Sections: .text, .rodata, .data, .bss, .symtab, .strtab, .shstrtab, .comment, .note.gnu.build-id, .eh_frame...
-Protections: NX: yes, PIE: no, Canary: no, RELRO: none
-```
+- `info`: Display ELF metadata (entry point, architecture, endianness, sections, protections).
+- `functions`: List function symbols with addresses and sizes.
+- `disas <name|address>`: Disassemble a named function or an address (targets `.text`).
+- `xrefs <address>`: Textual operand match search in `.text` for references to the given address (hex).
+- `patch <address> <hex_bytes>`: Overwrite bytes at a virtual address; creates a `.bak` backup before the first write.
+- `strings [min_len]`: Extract printable strings from `.rodata` and `.data` (default minimum length: 4).
+- `rop find [--ret] [--syscall]`: Search executable sections for ROP gadgets matching the given filters.
+- `version`: Print the current version and build info (same as `binja --version`).
 
-> The section list comes from an internal hash map, so the order you see is arbitrary, not file order — and it's truncated to 10 entries with a trailing `...` if there are more.
-
----
-
-#### `functions`
-List all function symbols with their virtual addresses and sizes, sorted by address.
-
-```
-binja> functions
-
-0x00401080 _start
-0x004010b0 __libc_csu_init (size: 101)
-0x00401156 main (size: 78)
-0x004011a4 vuln (size: 63)
-0x004011e3 win (size: 31)
-```
-
-If the binary has no `.symtab`/`.dynsym` FUNC entries it prints `No functions found (binary may be stripped)`. Use `disas 0x<address>` to disassemble by address directly in that case.
+Warning: patches are written to disk immediately. The `.bak` file is created before the first write and should be kept until the patched binary has been validated.
 
 ---
 
-#### `strings [min_len]`
-Extract printable strings from `.rodata` and `.data` only. Default minimum length is 4. Output is just the raw strings, one per line — no addresses or section labels.
+## Examples and Workflows
 
-```
-binja> strings 6
-
-Enter your name: 
-Hello, %s!
-cat /flag
-/bin/sh
-```
-
----
-
-#### `disas <function_name|address>`
-Disassemble a function by name (looked up in the symbol table) or by hex address. Internally this always locates the containing `.text` section, so functions living outside `.text` (e.g. in `.init`/`.plt`) won't disassemble correctly yet.
-
-```
-binja> disas vuln
-
-0x004011a4:	push rbp
-0x004011a5:	mov rbp, rsp
-0x004011a8:	sub rsp, 0x40
-0x004011ac:	lea rax, [rbp - 0x40]
-0x004011b0:	mov rsi, rax
-0x004011b3:	lea rdi, [rip + 0x84e]
-0x004011ba:	mov eax, 0
-0x004011bf:	call 0x401060
-0x004011c4:	nop
-0x004011c5:	leave
-0x004011c6:	ret
-```
-
-```bash
-# By address
-./binja ./binary disas 0x4011a4
-```
-
-If the name isn't found, binja prints every known function name/address as a suggestion list.
-
----
-
-#### `xrefs <address>`
-Scan the disassembled `.text` section for `call`, `jmp`, `mov`, or any `j*`-mnemonic instruction whose operand string contains the target address in hex. Address must be given in hex (`0x...`).
-
-```
-binja> xrefs 0x4011e3
-
-0x401200: call 0x4011e3
-0x40123a: jmp 0x4011e3
-```
-
-If nothing matches, binja prints `No cross-references found to 0x...`. Note this is a textual match against the disassembled operand string, not a real data-flow/relocation analysis — it won't catch references built up across multiple instructions (e.g. `lea`+`mov` address computation) or references outside `.text`.
-
----
-
-#### `patch <address> <hex_bytes>`
-Patch the binary in memory and on disk at the given address with the provided hex byte string. A `.bak` backup of the original file is created automatically before the first write (interactive and CLI modes both hardcode backups on).
-
-```
-binja> patch 0x4011bf 9090
-
-Patching at offset 0x11bf (2 bytes)
-Backed up original to ./vuln.bak
-Patched 2 bytes at 0x4011bf
-```
-
-```bash
-# NOP out a call instruction (5 bytes)
-binja> patch 0x4011bf 9090909090
-
-# Overwrite a jump condition
-binja> patch 0x401200 eb0e
-```
-
-> ⚠️ Patches are written to disk immediately. The `.bak` file is your safety net — keep it until you are sure the patch is correct.
-
----
-
-#### `hexdump <section> [offset] [length]` — *interactive mode only*
-Dump section data in hex + ASCII format. Offset and length are optional (defaults: offset `0`, length `256`).
-
-```
-binja> hexdump .rodata 0 64
-
-0x00000000: 45 6e 74 65 72 20 79 6f  75 72 20 6e 61 6d 65 3a   |Enter your name:|
-0x00000010: 20 00 48 65 6c 6c 6f 2c  20 25 73 21 0a 00 63 61   | .Hello, %s!..ca|
-0x00000020: 74 20 2f 66 6c 61 67 00  2f 62 69 6e 2f 73 68 00   |t /flag./bin/sh.|
-0x00000030: 00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00   |................|
-```
-
----
-
-#### `sections` — *interactive mode only*
-List all ELF sections known to binja (from its internal name map) with address, size, offset, and flags.
-
-```
-binja> sections
-
-Sections in binary:
-  .text                addr=0x0000000000401080 size=0x1a3 offset=0x1080 [EXEC]
-  .rodata               addr=0x0000000000402000 size=0x60 offset=0x2000
-  .data                 addr=0x0000000000404000 size=0x10 offset=0x3e00 [WRITE]
-  .bss                  addr=0x0000000000404010 size=0x8 offset=0x3e10 [WRITE]
-  .symtab               addr=0x0000000000000000 size=0x240 offset=0x4000
-  .strtab               addr=0x0000000000000000 size=0xe1 offset=0x4240
-```
-
----
-
-#### `segments` — *interactive mode only*
-List program headers with offsets, virtual/physical addresses, sizes, and permission flags. Type names are printed without the `PT_` prefix (`LOAD`, `DYNAMIC`, `GNU_STACK`, `GNU_RELRO`, `INTERP`, or `UNKNOWN`).
-
-```
-binja> segments
-
-Program segments:
-  Type           Offset   VirtAddr   PhysAddr   FileSiz  MemSiz   Flags Align
-  LOAD           0x000000 0x00400000 0x00400000 0x0002e8 0x0002e8 R     0x1000
-  LOAD           0x001000 0x00401000 0x00401000 0x0001a3 0x0001a3 R E   0x1000
-  LOAD           0x002000 0x00402000 0x00402000 0x0000c4 0x0000c4 R     0x1000
-  LOAD           0x003e00 0x00403e00 0x00403e00 0x00022c 0x00023c RW    0x1000
-  GNU_STACK      0x000000 0x00000000 0x00000000 0x000000 0x000000 RW    0x10
-```
-
----
-
-#### `history` — *interactive mode only*
-Show the in-session command history by index (no timestamps — those are only recorded in the `.binja_history` file on disk).
-
-```
-binja> history
-
-Command history:
-  1  info
-  2  functions
-  3  disas vuln
-  4  xrefs 0x4011e3
-  5  patch 0x4011bf 9090
-```
-
----
-
-#### `help` — *interactive mode only*
-Display command reference and usage hints in the REPL.
-
-#### `exit` / `quit`
-Exit interactive mode cleanly.
-
----
-
-## Examples & Workflows
-
-### 1. Full binary recon
+1. Reconnaissance and analysis:
 
 ```bash
 ./binja ./challenge
-
-binja> info         # Entry point, protections
-binja> sections     # Identify interesting sections
-binja> segments     # Check NX (PT_GNU_STACK flags)
-binja> functions    # What's in the symbol table?
-binja> strings 5    # Any juicy strings? /bin/sh? flag paths?
-binja> rop find --ret # Any gadgets having ret
+binja> info
+binja> sections
+binja> segments
+binja> functions
+binja> strings 5
+binja> rop find --ret
 ```
 
----
+2. Identify a vulnerable function and trace callers:
 
-### 2. Identifying a vulnerable function and its callers
-
-```bash
+```
 binja> functions
-# spot 'vuln' at 0x4011a4
-
 binja> disas vuln
-# see the scanf with a fixed buffer — classic overflow
-
 binja> xrefs 0x4011a4
-# find who calls vuln, trace execution path
 ```
 
 ---
 
-### 3. Patching out a security check
+## Architecture and Internals
 
-```bash
-binja> disas check_auth
-# 0x401320: test eax, eax
-# 0x401322: jne 0x401380   <-- jump if auth fails
-
-# Patch jne (75 XX) to jmp (eb XX) to always take the branch
-binja> patch 0x401322 eb5c
-
-binja> disas check_auth
-# verify the patch landed correctly
-```
-
----
-
-### 4. Locating a win function for a ret2win
-
-```bash
-binja> functions
-# 0x4011e3   win   (size: 31)
-
-binja> disas win
-# confirm it calls system("/bin/sh") or similar
-
-binja> xrefs 0x4011e3
-# verify it's never called legitimately — pure overflow target
-```
-
----
-
-### 5. Extracting hidden strings from a crackme
-
-```bash
-binja> strings 8
-# look for long strings — flags, passwords, keys
-
-binja> hexdump .rodata
-# when you need the raw bytes around a string
-```
-
----
-
-### 6. Using history expansion
-
-```bash
-binja> disas main
-binja> disas vuln
-binja> !!         # re-runs: disas vuln
-binja> !1         # re-runs: disas main
-binja> history    # review in-session history
-```
-
----
-
-## Architecture & Internals
-
-binja is built around four cooperating modules:
-
-```
-┌─────────────────────────────────────────────────────┐
-│                      main.cpp                       │
-│         CLI dispatch / Interactive REPL             │
-│         Command history / Signal handling           │
-└────────────┬──────────────────────┬────────────────┘
-             │                      │
-    ┌────────▼────────┐    ┌────────▼────────┐
-    │  elf_parser.cpp │    │ disassembler.cpp │
-    │                 │    │                  │
-    │  ELF64/32 hdr   │    │  Capstone init   │
-    │  Section table  │    │  x86/x86-64 dis  │
-    │  Program hdrs   │    │  xref scanner    │
-    │  .symtab        │    └─────────────────┘
-    │  .dynsym        │
-    │  .strtab        │    ┌─────────────────┐
-    │  String extract │    │   patcher.cpp   │
-    │  Protection det.│    │                 │
-    └─────────────────┘    │  .bak creation  │
-                           │  In-memory patch│
-                           │  On-disk write  │
-                           └─────────────────┘
-```
-
-**ELF parsing** is done entirely by hand — `Elf64_Ehdr`, `Elf64_Shdr`, `Elf64_Phdr`, `Elf64_Sym` structs (plus 32-bit equivalents, upconverted into the 64-bit structs) are read directly from the `mmap`'d file. No libelf, no BFD, no external parsing library.
-
-**Disassembly** wraps the Capstone C API in a thin C++ class. `cs_open`, `cs_disasm`, and `cs_close` handle the lifecycle; the xref scanner disassembles the entire `.text` section up front and then string-matches each decoded instruction's operand text against the target address in hex.
-
-**Patching** uses standard `std::fstream` seek/write (`patch_file` opens the target in `ios::binary | ios::in | ios::out`, `seekp`s to the computed offset, and writes the new bytes) to overwrite bytes at the file offset corresponding to a given virtual address. That offset is computed by `virtual_to_offset`, which walks the `PT_LOAD` segments to find the matching `p_offset + (vaddr - p_vaddr)` translation — it does not use `mmap` for writing.
+binja consists of five primary modules: `main` (CLI and REPL), `elf_parser` (manual ELF parsing), `disassembler` (Capstone wrapper and xref scanning), `patcher` (file writes and backups), and `rop_finder` (gadget scanning, filtering, and chain/export helpers). ELF structures are read directly from the memory-mapped file; disassembly uses the Capstone C API. Patching performs virtual-to-file offset translation by walking `PT_LOAD` segments and writes bytes via standard stream I/O.
 
 ---
 
@@ -498,129 +234,122 @@ binja is built around four cooperating modules:
 
 ```
 binja/
-├── main.cpp            # CLI entry point, REPL, command dispatch, history
-├── elf_parser.cpp      # Manual ELF parsing: headers, sections, symbols, strings, protections
-├── disassembler.cpp    # Capstone wrapper: disassembly engine, xref scanning
-├── patcher.cpp         # Binary patching with .bak backup creation
-├── elf_parser.h        # ElfParser class definition
-├── disassembler.h      # Disassembler class definition
-├── patcher.h           # Patcher class definition
-├── Makefile            # Build system: release / debug / clean / help targets
+├── main.cpp
+├── elf_parser.cpp
+├── elf_parser.h
+├── disassembler.cpp
+├── disassembler.h
+├── patcher.cpp
+├── patcher.h
+├── rop_finder.cpp
+├── rop_finder.h
+├── VERSION
+├── Makefile
 └── README.md
 ```
 
 ---
 
+## Versioning
+
+The project follows a simple `MAJOR.MINOR` scheme recorded in the `VERSION` file at the repository root, bumped manually with each release. The Makefile stamps this version, along with the current git commit hash and UTC build timestamp, directly into the compiled binary.
+
+Check the current version:
+
+```bash
+binja --version
+# or
+binja -v
+```
+
+Example output:
+
+```
+binja 2.0 (4df5d3a-2026-08-13T10:12:00Z)
+```
+
+To release a new version, update `VERSION` and commit it alongside your other changes:
+
+```bash
+echo "2.1" > VERSION
+git add VERSION
+git commit -m "Bump version to 2.1"
+```
+
+---
+
+## Upgrading
+
+After pulling changes, always rebuild from a clean state before reinstalling, and confirm the running binary matches what you expect:
+
+```bash
+make clean
+make
+sudo make install
+binja --version
+```
+
+If `binja --version` does not show the expected version or commit hash, check for a stale binary earlier in your `PATH`:
+
+```bash
+which -a binja
+```
+
+If more than one path is listed, the first one is what actually runs. Remove or update the outdated copy so only the current install remains.
+
+---
+
 ## Limitations
 
-- **ELF only** — no PE (Windows) or Mach-O (macOS) support
-- **x86 / x86-64** — Capstone supports other archs but binja's section logic is currently wired for these two; other architectures will fail gracefully
-- **Limited 32-bit testing** — 32-bit ELF parsing is implemented (structs are upconverted to 64-bit internally) but less battle-tested than 64-bit
-- **RELRO detection is binary** — `check_protections()` currently only reports `"none"` or `"full"` (it sets `full` whenever a `PT_GNU_RELRO` segment exists); there's no partial-RELRO distinction yet
-- **Stack canary detection is symbol-based** — it looks for a `__stack_chk_fail` symbol in `.symtab`/`.dynsym`, so a canary-protected but fully stripped binary can show a false negative
-- **ASLR/exec-stack fields aren't surfaced** — `ProtectionInfo` has `aslr`/`execstack` members but nothing currently populates or prints them
-- **`xrefs` is a textual match, not real data-flow analysis** — it only catches references that appear as a literal hex operand on a `call`/`jmp`/`mov`/`j*` instruction within `.text`
-- **`disas` is hardcoded to `.text`** — functions outside `.text` (PLT stubs, `.init`, etc.) aren't handled
-- **`hexdump`, `sections`, and `segments` are interactive-only** — they aren't wired into command-line (one-shot) mode yet
-- **Dynamic section parsing is a stub** — `get_dynamic_entry()` and `get_plt_addresses()` are unimplemented placeholders that always return empty/zero; `get_imported_symbols()`/`get_exported_symbols()` exist but aren't exposed through any CLI command yet
-- **No DWARF parsing** — debug info (file/line mapping) is not read; stripped binaries show addresses only
-- **No dynamic analysis** — static analysis only; no tracing, no emulation
+- ELF only: no PE (Windows) or Mach-O (macOS) support
+- x86 / x86-64 only: section logic is implemented for these architectures
+- Limited 32-bit testing
+- RELRO detection: reports `none` or `full` (no partial-RELRO distinction)
+- Stack canary detection is symbol-based and may false-negative on stripped binaries
+- `xrefs` is a textual operand match rather than a relocation-aware analysis
+- `disas` targets `.text` only
+- Some dynamic-section helpers are stubs and not exposed via CLI
+- No DWARF parsing or dynamic (runtime) analysis
 
 ---
 
 ## Troubleshooting
 
-| Error | Cause | Fix |
-|---|---|---|
-| `Cannot resolve address 0x...` | Address falls outside all PT_LOAD segments | Verify the address with `segments`; make sure the binary is not PIE with ASLR active |
-| Function not found, list of suggestions printed | Binary is stripped, no `.symtab`/`.dynsym` FUNC entries | Use `disas 0x<address>` directly |
-| `Capstone init failed` | Missing or incorrect Capstone install | Run `ldd ./binja` and check `libcapstone.so` resolves |
-| `Permission denied` when patching | File is read-only | `chmod u+w ./target` before patching |
-| `.binja_history` not updating | Directory not writable | Run binja from a directory you own |
+Common issues and remedies:
+
+- `Cannot resolve address 0x...`: Verify the address with `segments`; ensure the address falls within a `PT_LOAD` segment and that PIE/ASLR considerations are addressed.
+- Missing Capstone: run `ldd ./binja` and ensure `libcapstone.so` resolves, or install `libcapstone-dev`.
+- Permission denied when patching: ensure the target file is writable (`chmod u+w ./target`).
+- `.binja_history` not updating: run binja from a writable directory.
+- Colors or version info look wrong after an update: run `which -a binja` to check for a stale binary shadowing the current one, then see Upgrading above.
 
 ---
 
 ## Comparison to Other Tools
 
-binja is not a replacement for radare2, Ghidra, or Binary Ninja (the commercial product). It is a **focused, lightweight CLI tool** for the specific workflows that come up most in binary exploitation and CTF work.
-
-| Capability | binja | readelf | objdump | radare2 |
-|---|:---:|:---:|:---:|:---:|
-| ELF section/segment listing | ✅ | ✅ | ✅ | ✅ |
-| Disassembly | ✅ | ❌ | ✅ | ✅ |
-| Symbol table listing | ✅ | ✅ | ✅ | ✅ |
-| Cross-reference finder | ✅ (text-match) | ❌ | ❌ | ✅ |
-| Binary patching (with backup) | ✅ | ❌ | ❌ | ✅ |
-| Protection analysis | ✅ (NX/PIE/Canary/RELRO) | Partial | ❌ | ✅ |
-| Interactive REPL w/ history | ✅ | ❌ | ❌ | ✅ |
-| String extraction | ✅ | ❌ | ✅ | ✅ |
-| Scripting / API | ❌ | ❌ | ❌ | ✅ |
-| Dependency count | 1 (capstone) | 0 | 0 | Many |
-
-**Use binja when:** you want fast answers in a CTF, you are writing exploit scripts and want quick one-liners, or you just don't want to wait for radare2 to load.
-
-**Use radare2/Ghidra/Binary Ninja when:** you need decompilation, advanced scripting, graph views, partial-RELRO/ASLR-aware protection reports, or analysis of non-ELF formats.
-
----
-
-## Tips for Reverse Engineering Workflows
-
-```
-1. Start with `info` — know your protections before anything else.
-   Remember RELRO here is only ever "none" or "full" right now.
-
-2. `strings` before `disas` — a /bin/sh or a flag path tells you
-   immediately what the intended vector is.
-
-3. Use `xrefs` to trace data flow backward — but remember it's a
-   text match on .text operands, so double-check anything subtle
-   (e.g. address built via lea + separate mov) by hand.
-
-4. Keep patches surgical — NOP the minimum number of bytes,
-   verify with `disas` after every patch.
-
-5. .bak files are sacred — never delete them until the patched
-   binary is confirmed working.
-```
+binja is a lightweight CLI utility intended for quick static analysis and patching workflows (for example, CTFs or exploit development). It is not a replacement for full-featured reverse engineering platforms such as Ghidra, Binary Ninja, or radare2.
 
 ---
 
 ## Contributing
 
-Bug reports, feature requests, and pull requests are welcome.
+Contributions are welcome. Before submitting a PR, run `make` and `make debug`, test against representative ELF binaries, and keep changes focused and consistent with the existing C++17 code style.
 
-**Before submitting a PR:**
-- Run `make` and `make debug` cleanly
-- Test against at least one real ELF binary (statically linked and dynamically linked)
-- Keep additions self-contained within the relevant source file
-- Match the existing code style (C++17, no STL containers in the hot path if avoidable)
-
-**Planned / good-first-issue features:**
-- Partial-RELRO detection (currently collapsed to none/full)
-- GOT/PLT table display (`get_plt_addresses`/`get_dynamic_entry` are stubs today)
-- Wire `hexdump`/`sections`/`segments` into command-line (non-interactive) mode
-- 32-bit ELF test suite
-- DWARF line info parsing (basic)
-- JSON output mode for scripting integration
+Planned or suitable first issues include partial-RELRO detection, GOT/PLT table support, exposing interactive-only commands for non-interactive mode, expanding 32-bit coverage, and adding JSON output.
 
 ---
 
 ## Security Notice
 
-binja is a **static analysis and patching tool** intended for:
-
-- Security research on software you own or have explicit written permission to analyze
-- CTF challenges
-- Reverse engineering for interoperability and vulnerability research under applicable law
-
-Do not use binja to analyze or patch binaries without authorization. The authors are not responsible for misuse.
+Do not use binja to analyze or modify binaries without authorization. The tool is intended for security research, CTFs, and authorized reverse engineering work. The authors are not responsible for misuse.
 
 ---
 
 ## Author
-> **"Trust The Process" — My Princess**
 
-> **kaizen_dragon**
+> "Trust The Process" - My Princess
+
+> kaizen_dragon
 
 ---
 
