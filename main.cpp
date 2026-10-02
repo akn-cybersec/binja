@@ -14,6 +14,49 @@
 #include <unistd.h>
 #include <cstring>
 
+
+// -----------------------------------------------------------------------------
+// Terminal colors
+// -----------------------------------------------------------------------------
+namespace Color {
+    constexpr const char* RESET  = "\033[0m";
+    constexpr const char* BOLD   = "\033[1m";
+    constexpr const char* DIM    = "\033[2m";
+    constexpr const char* RED    = "\033[31m";
+    constexpr const char* GREEN  = "\033[32m";
+    constexpr const char* YELLOW = "\033[33m";
+    constexpr const char* BLUE   = "\033[34m";
+    constexpr const char* CYAN   = "\033[36m";
+    constexpr const char* WHITE  = "\033[37m";
+
+    // One restrained color per command family. The palette is intentionally
+    // small so the interface feels active without becoming a rainbow.
+    inline const char* command_color(const std::string& command) {
+        if (command == "info" || command == "sections") return CYAN;
+        if (command == "functions" || command == "hexdump") return BLUE;
+        if (command == "strings" || command == "rop") return GREEN;
+        if (command == "disas") return YELLOW;
+        if (command == "xrefs" || command == "segments") return WHITE;
+        if (command == "patch") return RED;
+        if (command == "history") return YELLOW;
+        if (command == "version") return GREEN;
+        if (command == "help") return CYAN;
+        return WHITE;
+    }
+
+    struct CommandGuard {
+        explicit CommandGuard(const std::string& command) {
+            std::cout << command_color(command);
+            std::cerr << command_color(command);
+        }
+
+        ~CommandGuard() {
+            std::cout << RESET;
+            std::cerr << RESET;
+        }
+    };
+}
+
 // Stamped at build time via -DBINJA_VERSION / -DBINJA_BUILD_INFO in the Makefile.
 // Falls back to these defaults if built without the Makefile (e.g. a raw g++ invocation),
 // so `binja --version` always prints something useful for debugging stale installs.
@@ -84,7 +127,7 @@ void cmd_functions(ElfParser& elf) {
     std::vector<Symbol> functions = elf.get_functions();
     
     if (functions.empty()) {
-        std::cout << "No functions found (binary may be stripped)\n";
+        std::cout << Color::YELLOW << "No functions found (binary may be stripped)" << Color::RESET << "\n";
         return;
     }
     
@@ -103,7 +146,7 @@ void cmd_strings(ElfParser& elf, size_t min_len) {
     std::vector<std::string> strings = elf.get_strings(min_len);
     
     if (strings.empty()) {
-        std::cout << "No strings found\n";
+        std::cout << Color::YELLOW << "No strings found" << Color::RESET << "\n";
         return;
     }
     
@@ -144,7 +187,7 @@ void cmd_disas(ElfParser& elf, Disassembler& dis, const std::string& target) {
 
 void cmd_xrefs(ElfParser& elf, Disassembler& dis, const std::string& target) {
     if (!is_hex_address(target)) {
-        std::cerr << "Error: Address must be in hex format (e.g., 0x401234)\n";
+        std::cerr << Color::RED << "Error: Address must be in hex format (e.g., 0x401234)" << Color::RESET << "\n";
         return;
     }
     
@@ -158,7 +201,7 @@ void cmd_xrefs(ElfParser& elf, Disassembler& dis, const std::string& target) {
     std::vector<Xref> xrefs = dis.find_xrefs(addr, elf);
     
     if (xrefs.empty()) {
-        std::cout << "No cross-references found to 0x" << std::hex << addr << std::dec << "\n";
+        std::cout << Color::YELLOW << "No cross-references found to 0x" << std::hex << addr << std::dec << Color::RESET << "\n";
         return;
     }
     
@@ -170,7 +213,7 @@ void cmd_xrefs(ElfParser& elf, Disassembler& dis, const std::string& target) {
 
 void cmd_patch(ElfParser& elf, const std::string& target, const std::string& hex_bytes) {
     if (!is_hex_address(target)) {
-        std::cerr << "Error: Address must be in hex format (e.g., 0x401234)\n";
+        std::cerr << Color::RED << "Error: Address must be in hex format (e.g., 0x401234)" << Color::RESET << "\n";
         return;
     }
     
@@ -182,20 +225,20 @@ void cmd_patch(ElfParser& elf, const std::string& target, const std::string& hex
     }
     
     if (Patcher::apply_patch(elf, addr, bytes, true)) {
-        std::cout << "Patched " << bytes.size() << " bytes at 0x" 
-                  << std::hex << addr << std::dec << "\n";
+        std::cout << Color::GREEN << "Patched " << bytes.size() << " bytes at 0x" 
+                  << std::hex << addr << std::dec << Color::RESET << "\n";
     }
 }
 
 void cmd_hexdump(ElfParser& elf, const std::string& section, size_t offset, size_t length) {
     std::vector<uint8_t> data = elf.get_section_data(section);
     if (data.empty()) {
-        std::cerr << "Error: Section '" << section << "' not found or empty\n";
+        std::cerr << Color::RED << "Error: Section '" << section << "' not found or empty\n";
         return;
     }
     
     if (offset >= data.size()) {
-        std::cerr << "Error: Offset " << offset << " exceeds section size " << data.size() << "\n";
+        std::cerr << Color::RED << "Error: Offset " << offset << " exceeds section size " << data.size() << "\n";
         return;
     }
     
@@ -257,7 +300,7 @@ void cmd_sections(ElfParser& elf) {
 void cmd_segments(ElfParser& elf) {
     std::vector<SegmentInfo> segments = elf.get_segments();
     if (segments.empty()) {
-        std::cerr << "No program segments found\n";
+        std::cerr << Color::YELLOW << "No program segments found" << Color::RESET << "\n";
         return;
     }
     
@@ -278,7 +321,7 @@ void cmd_segments(ElfParser& elf) {
 
 void cmd_history() {
     if (command_history.empty()) {
-        std::cout << "No commands in history\n";
+        std::cout << Color::YELLOW << "No commands in history" << Color::RESET << "\n";
         return;
     }
     
@@ -360,13 +403,10 @@ void add_to_history(const std::string& cmd) {
 
 std::string get_input() {
     std::string input;
-    const char* blue = "\033[0;34m";
-    const char* reset = "\033[0m";
     const char* prompt = "binja> ";
-    
-    write(STDOUT_FILENO, blue, strlen(blue));
-    write(STDOUT_FILENO, prompt, strlen(prompt));
-    write(STDOUT_FILENO, reset, strlen(reset));
+
+    std::cout << Color::BOLD << Color::BLUE << prompt << Color::RESET;
+    std::cout.flush();
     
     if (!std::getline(std::cin, input)) {
         return "exit";
@@ -377,15 +417,9 @@ std::string get_input() {
 
 void signal_handler(int sig) {
     if (sig == SIGINT) {
-        std::cout << "\nType 'exit' to quit\n";
-        
-        const char* blue = "\033[0;34m";
-        const char* reset = "\033[0m";
-        const char* prompt = "binja> ";
-        
-        write(STDOUT_FILENO, blue, strlen(blue));
-        write(STDOUT_FILENO, prompt, strlen(prompt));
-        write(STDOUT_FILENO, reset, strlen(reset));
+        std::cout << "\n" << Color::YELLOW << "Type 'exit' to quit" << Color::RESET << "\n";
+        std::cout << Color::BOLD << Color::BLUE << "binja> " << Color::RESET;
+        std::cout.flush();
     }
 }
 
@@ -396,22 +430,22 @@ bool execute_command(ElfParser& elf, const std::string& input) {
     std::string cmd = input;
     if (input == "!!") {
         if (command_history.empty()) {
-            std::cerr << "No commands in history\n";
+            std::cerr << Color::YELLOW << "No commands in history" << Color::RESET << "\n";
             return true;
         }
         cmd = command_history.back();
-        std::cout << "Repeating: " << cmd << "\n";
+        std::cout << Color::BLUE << "Repeating: " << cmd << "\n";
     } else if (input[0] == '!') {
         try {
             size_t idx = std::stoul(input.substr(1)) - 1;
             if (idx >= command_history.size()) {
-                std::cerr << "Invalid history index\n";
+                std::cerr << Color::RED << "Invalid history index" << Color::RESET << "\n";
                 return true;
             }
             cmd = command_history[idx];
-            std::cout << "Repeating: " << cmd << "\n";
+            std::cout << Color::BLUE << "Repeating: " << cmd << "\n";
         } catch (...) {
-            std::cerr << "Invalid history command\n";
+            std::cerr << Color::RED << "Invalid history command" << Color::RESET << "\n";
             return true;
         }
     }
@@ -421,6 +455,12 @@ bool execute_command(ElfParser& elf, const std::string& input) {
     std::string command;
     iss >> command;
     
+    if (command.empty()) {
+        return true;
+    }
+
+    Color::CommandGuard command_guard(command);
+
     if (command == "exit" || command == "quit") {
         return false;
     }
@@ -447,7 +487,7 @@ bool execute_command(ElfParser& elf, const std::string& input) {
     else if (command == "disas") {
         std::string target;
         if (!(iss >> target)) {
-            std::cerr << "Error: Missing function name or address\n";
+            std::cerr << Color::RED << "Error: Missing function name or address" << Color::RESET << "\n";
             return true;
         }
         Disassembler dis;
@@ -456,7 +496,7 @@ bool execute_command(ElfParser& elf, const std::string& input) {
     else if (command == "xrefs") {
         std::string target;
         if (!(iss >> target)) {
-            std::cerr << "Error: Missing target address\n";
+            std::cerr << Color::RED << "Error: Missing target address" << Color::RESET << "\n";
             return true;
         }
         Disassembler dis;
@@ -465,7 +505,7 @@ bool execute_command(ElfParser& elf, const std::string& input) {
     else if (command == "patch") {
         std::string target, hex_bytes;
         if (!(iss >> target >> hex_bytes)) {
-            std::cerr << "Error: Missing address or hex bytes\n";
+            std::cerr << Color::RED << "Error: Missing address or hex bytes" << Color::RESET << "\n";
             return true;
         }
         cmd_patch(elf, target, hex_bytes);
@@ -475,7 +515,7 @@ bool execute_command(ElfParser& elf, const std::string& input) {
         size_t offset = 0, length = 256;
         iss >> section;
         if (section.empty()) {
-            std::cerr << "Error: Missing section name\n";
+            std::cerr << Color::RED << "Error: Missing section name" << Color::RESET << "\n";
             return true;
         }
         if (iss >> offset) {
@@ -523,18 +563,18 @@ bool execute_command(ElfParser& elf, const std::string& input) {
         cmd_history();
     }
     else if (!command.empty()) {
-        std::cerr << "Unknown command: " << command << ". Type 'help' for available commands.\n";
+        std::cerr << Color::RED << "Unknown command: " << command << ". Type 'help' for available commands." << Color::RESET << "\n";
     }
     
     return true;
 }
 
 void interactive_mode(ElfParser& elf, const std::string& binary_name) {
-    std::cout << "\n╔════════════════════════╗\n";
+    std::cout << "\n" << Color::BOLD << Color::CYAN << "╔════════════════════════╗\n";
     std::cout << "║         BINJA          ║\n";
-    std::cout << "╚════════════════════════╝\n";
-    std::cout << "Binary: " << binary_name << "\n";
-    std::cout << "Type 'help' for available commands, 'exit' to quit\n\n";
+    std::cout << "╚════════════════════════╝" << Color::RESET << "\n";
+    std::cout << Color::BOLD << Color::BLUE << "Binary: " << Color::RESET << binary_name << "\n";
+    std::cout << Color::DIM << "Type 'help' for available commands, 'exit' to quit" << Color::RESET << "\n\n";
     
     // Set signal handler for Ctrl+C
     signal(SIGINT, signal_handler);
@@ -546,7 +586,7 @@ void interactive_mode(ElfParser& elf, const std::string& binary_name) {
         std::string input = get_input();
         
         if (input == "exit" || input == "quit" || input.empty()) {
-            std::cout << "Goodbye!\n";
+            std::cout << Color::GREEN << "Goodbye!" << Color::RESET << "\n";
             break;
         }
         
@@ -563,11 +603,11 @@ void interactive_mode(ElfParser& elf, const std::string& binary_name) {
 }
 
 void print_version() {
-    std::cout << "binja " << BINJA_VERSION << " (" << BINJA_BUILD_INFO << ")\n";
+    std::cout << Color::BOLD << Color::GREEN << "binja " << BINJA_VERSION << Color::RESET << " (" << BINJA_BUILD_INFO << ")\n";
 }
 
 void print_usage(const char* progname) {
-    std::cout << "Usage: " << progname << " [binary] [command] [args...]\n\n"
+    std::cout << Color::BOLD << Color::GREEN << "Usage: " << Color::RESET << progname << " [binary] [command] [args...]\n\n"
               << "Interactive Mode:\n"
               << "  " << progname << " <binary>              - Start interactive REPL\n\n"
               << "Command Mode:\n"
@@ -609,13 +649,13 @@ void cmd_rop_find(ElfParser& elf, Disassembler& dis, const std::string& args) {
         std::vector<std::string> effects = {"pop rdi", "system"};
         auto chain = rop.build_chain(effects);
         if (chain) {
-            std::cout << "[+] Built ROP chain:\n";
+            std::cout << Color::GREEN << "[+] Built ROP chain:" << Color::RESET << "\n";
             for (const auto& gadget : chain->gadgets) {
                 rop.print_gadget(gadget);
             }
-            std::cout << "\nPython exploit:\n" << rop.to_python_exploit(*chain);
+            std::cout << "\n" << Color::BOLD << "Python exploit:" << Color::RESET << "\n" << rop.to_python_exploit(*chain);
         } else {
-            std::cout << "[-] Could not build chain\n";
+            std::cout << Color::RED << "[-] Could not build chain" << Color::RESET << "\n";
         }
     } else {
         // Default: find all gadgets
@@ -639,7 +679,7 @@ void cmd_rop_export(ElfParser& elf, Disassembler& dis,
     }
     
     if (addrs.empty()) {
-        std::cerr << "Error: No valid addresses provided\n";
+        std::cerr << Color::RED << "Error: No valid addresses provided" << Color::RESET << "\n";
         return;
     }
     
@@ -653,9 +693,9 @@ void cmd_rop_export(ElfParser& elf, Disassembler& dis,
     std::ofstream file(filename);
     if (file) {
         file << rop.to_python_exploit(chain);
-        std::cout << "[+] Exported ROP chain to " << filename << std::endl;
+        std::cout << Color::GREEN << "[+] Exported ROP chain to " << filename << Color::RESET << std::endl;
     } else {
-        std::cerr << "Error: Could not write to " << filename << std::endl;
+        std::cerr << Color::RED << "Error: Could not write to " << filename << Color::RESET << std::endl;
     }
 }
 int main(int argc, char* argv[]) {
@@ -689,6 +729,7 @@ int main(int argc, char* argv[]) {
     
     // Command mode (original functionality)
     std::string command = argv[2];
+    Color::CommandGuard command_guard(command);
     
     if (command == "info") {
         cmd_info(elf);
@@ -705,7 +746,7 @@ int main(int argc, char* argv[]) {
     }
     else if (command == "disas") {
         if (argc < 4) {
-            std::cerr << "Error: Missing function name or address\n";
+            std::cerr << Color::RED << "Error: Missing function name or address" << Color::RESET << "\n";
             return 1;
         }
         Disassembler dis;
@@ -713,7 +754,7 @@ int main(int argc, char* argv[]) {
     }
     else if (command == "xrefs") {
         if (argc < 4) {
-            std::cerr << "Error: Missing target address\n";
+            std::cerr << Color::RED << "Error: Missing target address" << Color::RESET << "\n";
             return 1;
         }
         Disassembler dis;
@@ -721,7 +762,7 @@ int main(int argc, char* argv[]) {
     }
     else if (command == "patch") {
         if (argc < 5) {
-            std::cerr << "Error: Missing address or hex bytes\n";
+            std::cerr << Color::RED << "Error: Missing address or hex bytes" << Color::RESET << "\n";
             return 1;
         }
         cmd_patch(elf, argv[3], argv[4]);
@@ -733,7 +774,7 @@ int main(int argc, char* argv[]) {
         print_version();
     }
     else {
-        std::cerr << "Error: Unknown command '" << command << "'\n";
+        std::cerr << Color::RED << "Error: Unknown command '" << command << "'" << Color::RESET << "\n";
         print_usage(argv[0]);
         return 1;
     }
