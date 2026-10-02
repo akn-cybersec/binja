@@ -69,7 +69,7 @@ void print_flag(void) {
     printf("╔══════════════════════════════════════════════════════╗\n");
     printf("║                    BINJA TEST FLAG                   ║\n");
     printf("║                                                      ║\n");
-    printf("║  BINJA{ELF_Analyzer_Parsing_Disassembly_Patching}   ║\n");
+    printf("║   BINJA{ELF_Analyzer_Parsing_Disassembly_Patching}   ║\n");
     printf("║                                                      ║\n");
     printf("╚══════════════════════════════════════════════════════╝\n");
     printf("\n");

@@ -45,7 +45,8 @@ cd binja
 make
 
 # Optional: install system-wide so 'binja' works from anywhere
-sudo make install
+chmod +x install.sh
+./install.sh
 
 # Run
 binja ./target_binary            # if installed
@@ -124,11 +125,9 @@ make
 # Debug build
 make debug
 
-# Install to $PREFIX/bin (defaults to /usr/bin, requires root)
-sudo make install
-
-# Remove an installed copy
-sudo make uninstall
+# Install using the bundled installer script
+chmod +x install.sh
+./install.sh
 
 # Clean build artifacts
 make clean
@@ -139,7 +138,7 @@ make help
 
 Note: `make debug` sets `-g -O0 -DDEBUG` in addition to the release flags. To enable sanitizers, add `-fsanitize=address,undefined` to `DEBUG_FLAGS` in the Makefile.
 
-The resulting binary is `./binja` in the project directory. You can run it directly from there, or run `sudo make install` to copy it to `$(PREFIX)/bin` so it's available system-wide as `binja`. Custom prefix example: `sudo make install PREFIX=/usr/local`.
+The resulting binary is `./binja` in the project directory. You can run it directly from there, or use `./install.sh` to make the installer executable and run the project install script, which copies it to `/usr/bin`.
 
 If you have previously installed binja to a different prefix, remove the old binary first to avoid one copy silently shadowing the other on your `PATH`:
 
@@ -271,7 +270,7 @@ binja 1.1 (4df5d3a-2026-08-13T10:12:00Z)
 To release a new version, update `VERSION` and commit it alongside your other changes:
 
 ```bash
-echo "2.1" > VERSION
+echo "1.1" > VERSION
 git add VERSION
 git commit -m "Bump version to 2.1"
 ```
@@ -285,7 +284,8 @@ After pulling changes, always rebuild from a clean state before reinstalling, an
 ```bash
 make clean
 make
-sudo make install
+chmod +x install.sh
+./install.sh
 binja --version
 ```
 
